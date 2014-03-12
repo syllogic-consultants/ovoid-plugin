@@ -229,49 +229,134 @@ public function ovoid_projectupdates_categories()  {
         $display = sanitize_text_field( $_POST['display'] ); 
 		if (isset($_POST['order'])){
 		$order = explode("_",$_POST['order']) ;
-		
-		//echo "<pre>",$_POST['order'],"</pre>";
-		//die;
         $selected_post_id =  $order[0];	
 		$selected_order =  $order[1];
 		}
+		
         $previous_order = get_post_meta($post_id,'order',true );
         update_post_meta( $post_id, 'excerpt', $excerpt);
         update_post_meta( $post_id, 'projectname', $projectname);
         update_post_meta( $post_id, 'access', $access);
         update_post_meta( $post_id, 'display', $display); 
+		
+		  
 		if (isset($_POST['order']) && $_POST['order']!= '') {
-		echo $previous_order;
 			
 		  if (!empty($previous_order) &&  trim($previous_order)!= ""  ) {
-		 // die('1');	
+		 
 				if ($previous_order != $selected_order){
-					update_post_meta( $post_id, 'order', $selected_order);  
-					update_post_meta( $selected_post_id, 'order', $previous_order);
+					//update_post_meta( $post_id, 'order', $selected_order);  
+					//update_post_meta( $selected_post_id, 'order', $previous_order);
+					$this->projectupdates_reorder($previous_order, $selected_order, $projectname);
+					
 				}
 		  }
 		  else{
-		 // die('2');	
+		 	
 			 $count = $wpdb->get_var( "select count(*) from wp_postmeta where post_id in (SELECT post_id FROM wp_postmeta wpmt where wpmt.meta_key = 'projectname' and wpmt.meta_value ='$projectname') and meta_key = 'order'" );
 		
 			 update_post_meta( $post_id, 'order', $count+1);
 		  }
 		}
 		else{
-		//echo  $previous_order;
-		//die('2');
+		
+		
 			if (empty($previous_order) ){
 			 $count = $wpdb->get_var( "select count(*) from wp_postmeta where post_id in (SELECT post_id FROM wp_postmeta wpmt where wpmt.meta_key = 'projectname' and wpmt.meta_value ='$projectname') and meta_key = 'order'" );
 		
 			 update_post_meta( $post_id, 'order', $count+1); 
 			}
-		}
-		
-          
-    }   
+		}     
+	}  
+	
+private function projectupdates_reorder($previous_order, $selected_order, $projectID) {
+//echo "<pre>", print_r($selected_order) ,"</pre>";
+//echo "<pre>", print_r($previous_order) ,"</pre>";
+	/*
+		we need to change the new order of affected range of updates, for example:
+		current order of PU posts IDs  [101 ,223 ,113, 43, 56....  ] 
+		is changed to [101, 56, 223, 113, 43...] this means that 5th place is not shifted to 2nd place, 
+		hence only 2nd to 5th posts have to have their order reset.  
+		So we need to start from the selected_order to the previous_order (increasing or decreasing order to change all 
+		post order meta field.
+	*/
+	//echo "Cur: ".$previous_order.", new: ".$selected_order;
+	$previousIdx = $previous_order - 1;
+	$selectedIdx = $selected_order - 1; 
+	// step 1 get the current order of PU posts for project post ID.
+	$result = $this->get_projectupdate_order($projectID);
+	$curentOrder = array();
+	$i=0;
+	foreach( $result as $meta ) {
+	  $curentOrder[$i] = $meta['post_id'];
+	  $i++;
+	}
+	//print_r($curentOrder);
+	//step 2, reorder the array
+	$newOrder = $this->reorder_array($curentOrder, $previousIdx, $selectedIdx);
+	//print_r($newOrder);
+	//die();
+	// step 3, update the DB
+	if($selectedIdx > $previousIdx ) {
+		$startPos = $previousIdx;
+		$endPos = $selectedIdx;	
+	}
+	else{
+		$startPos = $selectedIdx;
+		$endPos = $previousIdx;
+	}
+	/*echo "Last order: ";
+	print_r($curentOrder);
+	echo "<br/>New order: ";
+	print_r($newOrder);
+	$id=0;*/
+	for($i = $startPos; $i<=$endPos; $i++ ){
+		$id = $newOrder[$i];
+		$order = $i + 1; 
+		// array is 0 based while order is 1 base
+		//echo "<br/>".$i."Update id:".$id." to order: ".$order;
+		update_post_meta( $id, 'order', $order);	
+	}	
+	//die();
+}	
+private function reorder_array($orderedArr, $currentIndex, $newIndex){
+	$shift_value = $orderedArr[$currentIndex];  // capture value
+	//echo "Idx: ".$currentIndex."ord:". $newIndex;
+	$newOrder = $this->array_trim($orderedArr, $currentIndex); //remove from arrat
+	//print_r($newOrder);
+	return $this->array_put_to_position($newOrder, $shift_value, $newIndex);
+}
+private function array_trim( $array, $index ) {
+	   if ( is_array ( $array ) ) {
+		  unset ( $array[$index] );
+		  array_unshift ( $array, array_shift ( $array ) );
+		  return $array;
+		  }
+	   else {
+		  return false;
+		  }
+  }
+
+function array_put_to_position(&$array, $object, $position)
+{
+        $count = 0;
+        $return = array();
+        foreach ($array as $new1 => $arr)
+        {    
+                if ($count == $position)
+                {  
+                        $return[] = $object;
+                }  
+                $return[] = $arr;
+                $count++;
+        }  
+        $array = $return;
+        return $array;
+}
+
 
     public function Projectupdates_metabox($post) {
-        global  $wpdb;
+        //global  $wpdb;
          
         $postmetaArray = get_post_meta($post->ID);
        
@@ -326,7 +411,7 @@ public function ovoid_projectupdates_categories()  {
               endwhile;
                 
              wp_reset_query();            
-       //echo "<pre>", print_r($array_name) ,"</pre>";
+      
         echo "<div class='disp-row'>";
             echo "<div class='label'>\n";
                 echo "<label for='Project'>Project</label>";
@@ -398,11 +483,9 @@ public function ovoid_projectupdates_categories()  {
                 echo "<label for='order'>Order</label>\n";
             echo "</div>\n";
 
-		$sql = "SELECT  post_id , meta_value FROM wp_postmeta WHERE  post_id in (select post_id from wp_postmeta where meta_key = 'projectname' and meta_value = $id ) and meta_key = 'order' order by meta_value";
-		//$order_meta = array();
-		$result = $wpdb->get_results($sql, ARRAY_A);
-		
+		$results = $this->get_projectupdate_order($id);
 	//echo"<pre>",print_r($result),"</pre>";
+	//die('21');
 
 					
                      
@@ -410,7 +493,7 @@ public function ovoid_projectupdates_categories()  {
                 <select size="0" id="order" name="order" class="rwmb-select">
                   <option value="" selected="selected">Select an Order</option>
                  <?php 
-				 foreach( $result as $meta ) {
+				 foreach( $results as $meta ) {
 				  $combine = $meta['post_id']."_".$meta['meta_value'];
 						   if( $meta['meta_value'] == $order ):
 						  
@@ -428,7 +511,14 @@ public function ovoid_projectupdates_categories()  {
        
     }     
 
-	  function restrict_manage_project() {
+	private function get_projectupdate_order($projectID){
+		global $wpdb;
+		$sql = "SELECT  post_id , meta_value, CONVERT(meta_value,UNSIGNED INTEGER) AS intOrder FROM wp_postmeta WHERE  post_id in (select post_id from wp_postmeta where meta_key = 'projectname' and meta_value = $projectID ) and meta_key = 'order' order by intOrder";
+		return $wpdb->get_results($sql, ARRAY_A);
+
+	}
+
+function restrict_manage_project() {
          if (isset($_GET['post_type']) && post_type_exists($_GET['post_type']) && in_array(strtolower($_GET['post_type']), array('projectupdate', 'here'))) {
         $this->wp_dropdown_custom_field(array(
             'show_option_all'    => 'Show all Projects',
